@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jasoncraft</title>
+  </style>
+</head>
+
+<body>
+  <canvas id="canvas" width="1230" height="550" style="image-rendering:pixelated"></canvas>
+  <script src="img/blockdata.js"></script>
+  <script src="md5.js"></script>
+  <script>
+    const bSS = 16, // blockSpriteSize
+      bRS = 32, // blockRenderSize (1 wc = bRS px)
+      charW = 0.5, // Player's width (in wc)
+      charH = 0.5, // Player's height (in wc)
+      pSpeed = 4.32, // Player's moving speed (in wc/s) (world coordinate per second)
+      jSpeed = 9, // Player's jumping initial speed (in wc/s)
+      gAcc = 32, // Gravitational acceleration (in wc/s²)
+      maxH = 475, // Maximum height of the world
+      terminalVelocity = -10, // Terminal velocity when dropping
+      seed = 25548; // Random seed of the world
+
+    window.$ = function (s) { return document.querySelector(s); };
+
+    var canvas = $("#canvas");
+    var ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+
+    var px = 0, py = 20, // Player's position (in wc)
+      vx = 0, vy = 0; // Player's current velocity (in wc/s)
+    var world = new Map(); // world[x * maxH + y] = Block ID on (x, y), or -1 for nothing
+
+    function getBlock(wc) { // Get block ID on (wc[0], wc[1])
+      var x = wc[0], y = wc[1];
+      if (world.has(x * maxH + y)) return world.get(x * maxH + y);
+      // "world" only stores blocks that have been modified by the player
+      // so unmodified blocks should be generated
+      if (y >= 21) return -1;
+      if (y == 20) return 0; // Grass Block
+      if (y >= 16) return 1; // Dirt
+      if (encryptoInt(seed, x * maxH + y) % 50 == 0) return 3; // Iron Ore
+      return 2; // Stone
+    }
+
+    // wc = world coord.    cc = canvas coord.    bc = block coord.
+    function world2canvas(wc) { // Transform world coordinate into canvas coord.
+      return [bRS * (wc[0] - px) + Math.floor(canvas.width / 2),
+      bRS * (py - wc[1]) + Math.floor(canvas.height / 2)];
+    }
+    function canvas2world(cc) { // Transform canvas coord. into world coord.
+      return [px + (cc[0] - Math.floor(canvas.width / 2)) / bRS,
+      py - (cc[1] - Math.floor(canvas.height / 2)) / bRS];
+    }
+    function world2block(wc) { // Find coord. of the block which `wc` lies in
+      return [Math.floor(wc[0]), Math.ceil(wc[1])];
+    }
+    function coordEq(c1, c2) { // Determine whether two coord. are equal
+      return (c1[0] == c2[0] && c1[1] == c2[1]);
+    }
+
+    function collision() { // Detect whether player collides with anything
+      var func = function (x, y) {
+        var blockCoord = world2block([x, y]);
+        return (getBlock(blockCoord) != -1);
+      }
+      // res = [Top, Left, Bottom, Right];
+      var res = [false, false, false, false];
+      const mu = 0.001;
+      if (func(px - mu, py + mu)) res[1] = true;
+      if (func(px + mu, py - mu)) res[2] = true;
+      if (func(px + charW + mu, py + mu)) res[3] = true;
+      if (func(px + charW - mu, py - mu)) res[2] = true;
+      if (func(px + charW + mu, py + charH - mu)) res[3] = true;
+      if (func(px + charW - mu, py + charH + mu)) res[0] = true;
+      if (func(px - mu, py + charH - mu)) res[1] = true;
+      if (func(px + mu, py + charH + mu)) res[0] = true;
+      return res;
+    }
+    function collideWith(bc) { // Determine whether player collides with block at `bc`
+      var func = function (x, y) {
+        var blockCoord = world2block([x, y]);
+        return (coordEq(blockCoord, bc));
+      }
+      const mu = 0.001;
+      if (func(px + mu, py + mu)) return true;
+      if (func(px + charW - mu, py + mu)) return true;
+      if (func(px + charW - mu, py + charH - mu)) return true;
+      if (func(px + mu, py + charH - mu)) return true;
+      return false;
+    }
+
+    var blockSpr = new Image();
+    blockSpr.src = "img/blocksprite.png";
+    function drawBlock(x, y, id) {
+      if (id == -1) return;
+      var pos = blockData[id][1];
+      ctx.drawImage(blockSpr, pos[0] * bSS, pos[1] * bSS, bSS, bSS, x, y, bRS, bRS);
+    }
+    function drawBlocks() {
+      var numx = Math.floor(canvas.width / 2 / bRS) + 5,
+        numy = Math.floor(canvas.height / 2 / bRS) + 5;
+      var x = Math.round(px), y = Math.round(py);
+      for (var i = x - numx; i <= x + numx; i++)
+        for (var j = y - numy; j <= y + numy; j++) {
+          var pos = world2canvas([i, j]);
+          drawBlock(pos[0], pos[1], getBlock([i, j]));
+        }
+    }
+    function drawPlayer() {
+      var mid = [Math.floor(canvas.width / 2), Math.floor(canvas.height / 2)];
+      ctx.fillStyle = "blue";
+      ctx.fillRect(mid[0], mid[1] - charH * bRS, charW * bRS, charH * bRS);
+    }
+
+    var keyState = new Array(256); // keyState[keyCode] = 0 (up) / 1 (down)
+    for (var i = 0; i < keyState.length; i++) keyState[i] = 0;
+    document.addEventListener("keydown", function (e) {
+      keyState[e.which] = 1;
+    });
+    document.addEventListener("keyup", function (e) {
+      keyState[e.which] = 0;
+    });
+    document.addEventListener("keypress", function (e) {
+      switch (e.which) {
+        case 87: // W
+        case 119: // w
+          if (collision()[2]) // Player is on the ground
+            vy = jSpeed;
+          break;
+      }
+    });
+    canvas.addEventListener("click", function (e) {
+      var pos = canvas2world([e.offsetX, e.offsetY]);
+      var blockPos = world2block(pos);
+      if (getBlock(blockPos) != -1)
+        world.set(blockPos[0] * maxH + blockPos[1], -1);
+    });
+    canvas.oncontextmenu = function (e) {
+      e.preventDefault();
+      var pos = canvas2world([e.offsetX, e.offsetY]);
+      var blockPos = world2block(pos);
+      if (getBlock(blockPos) == -1 && !collideWith(blockPos))
+        world.set(blockPos[0] * maxH + blockPos[1], 1);
+    }
+
+    var lastTick = null; // Time of last tick
+    function tick() {
+      vx = 0;
+      if (keyState[65]) vx = -pSpeed; // A
+      if (keyState[68]) vx = pSpeed; // D
+
+      var now = new Date().getTime() / 1000; // in seconds
+      if (lastTick !== null) {
+        var delta = now - lastTick; // Time ellapsed since last tick
+        px += vx * delta;
+        var coll = collision();
+        if (coll[1]) vx = 0, px = Math.round(px);
+        if (coll[3]) vx = 0, px = Math.round(px + charW) - charW;
+        py += vy * delta;
+        coll = collision();
+        if (coll[0]) vy = 0, py = Math.round(py + charH) - charH;
+        if (coll[2]) {
+          vy = 0; // Player touches ground: reset velocity to 0
+          py = Math.round(py); // Avoid player's sinking into ground
+        }
+        else {
+          vy -= gAcc * delta; // Player is in the air: accelerate downward
+          vy = Math.max(vy, terminalVelocity);
+        }
+      }
+      lastTick = now;
+
+      // Render the scene
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawBlocks();
+      drawPlayer();
+      requestAnimationFrame(tick);
+    }
+    tick();
+  </script>
+</body>
+
+</html>

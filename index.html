@@ -96,20 +96,46 @@
 
     var blockSpr = new Image();
     blockSpr.src = "img/blocksprite.png";
-    function drawBlock(x, y, id) {
+    function drawBlock(x, y, id) { // Draw a single block. (x, y) is canvas coord.
       if (id == -1) return;
       var pos = blockData[id][1];
       ctx.drawImage(blockSpr, pos[0] * bSS, pos[1] * bSS, bSS, bSS, x, y, bRS, bRS);
     }
-    function drawBlocks() {
-      var numx = Math.floor(canvas.width / 2 / bRS) + 5,
-        numy = Math.floor(canvas.height / 2 / bRS) + 5;
+    var drawBlocksVars = {
+      vis: new Set(),
+      numx: Math.floor(canvas.width / 2 / bRS) + 5,
+      numy: Math.floor(canvas.height / 2 / bRS) + 5
+    };
+    function drawBlocks() { // Draw all blocks visible in the current scene
+      drawBlocksVars.vis = new Set();
       var x = Math.round(px), y = Math.round(py);
-      for (var i = x - numx; i <= x + numx; i++)
-        for (var j = y - numy; j <= y + numy; j++) {
-          var pos = world2canvas([i, j]);
-          drawBlock(pos[0], pos[1], getBlock([i, j]));
+      var pos = world2block([px + charW / 2, py + charH / 2]);
+      DFS(pos[0], pos[1]);
+      // Fill unrevealed part with given color
+      for (var i = x - drawBlocksVars.numx; i <= x + drawBlocksVars.numx; i++)
+        for (var j = y - drawBlocksVars.numy; j <= y + drawBlocksVars.numy; j++)
+          if (!drawBlocksVars.vis.has(i * maxH + j)) {
+            var cc = world2canvas([i, j]);
+            ctx.fillStyle = "#edee";
+            ctx.fillRect(cc[0], cc[1], bRS, bRS);
+          }
+    }
+    function DFS(bx, by) { // Draw visible blocks using DFS
+      drawBlocksVars.vis.add(bx * maxH + by);
+      var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      var x = Math.round(px), y = Math.round(py);
+      if (getBlock([bx, by]) == -1)
+        for (var dir of dirs) {
+          var bx1 = bx + dir[0], by1 = by + dir[1];
+          if (!drawBlocksVars.vis.has(bx1 * maxH + by1) &&
+            bx1 >= x - drawBlocksVars.numx && bx1 <= x + drawBlocksVars.numx &&
+            by1 >= y - drawBlocksVars.numy && by1 <= y + drawBlocksVars.numy)
+            DFS(bx1, by1);
         }
+      else {
+        var pos = world2canvas([bx, by]);
+        drawBlock(pos[0], pos[1], getBlock([bx, by]));
+      }
     }
     function drawPlayer() {
       var mid = [Math.floor(canvas.width / 2), Math.floor(canvas.height / 2)];
@@ -137,6 +163,9 @@
     canvas.addEventListener("click", function (e) {
       var pos = canvas2world([e.offsetX, e.offsetY]);
       var blockPos = world2block(pos);
+      var data = ctx.getImageData(e.offsetX, e.offsetY, 1, 1).data;
+      if (data[0] == 238 && data[1] == 221 && data[2] == 238 && data[3] == 238)
+        return; // Clicks on unrevealed block
       if (getBlock(blockPos) != -1)
         world.set(blockPos[0] * maxH + blockPos[1], -1);
     });
@@ -144,6 +173,9 @@
       e.preventDefault();
       var pos = canvas2world([e.offsetX, e.offsetY]);
       var blockPos = world2block(pos);
+      var data = ctx.getImageData(e.offsetX, e.offsetY, 1, 1).data;
+      if (data[0] == 238 && data[1] == 221 && data[2] == 238 && data[3] == 238)
+        return; // Clicks on unrevealed block
       if (getBlock(blockPos) == -1 && !collideWith(blockPos))
         world.set(blockPos[0] * maxH + blockPos[1], 1);
     }

@@ -6,12 +6,94 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jasoncraft</title>
+  <style>
+    * {
+      user-select: none;
+    }
+
+    #hotbar {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 50px;
+      z-index: 2;
+    }
+
+    #hotbar td {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #6b46346a;
+      padding: 0;
+      background-clip: content-box;
+      color: white;
+      font-weight: bold;
+      vertical-align: super;
+    }
+
+    #hotbar td.active {
+      border: 3px solid #165b1e;
+    }
+
+    #inv-wrapper {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      top: 50px;
+      z-index: 2;
+      background-color: #d0bb9d;
+      max-height: 360px;
+      overflow-y: scroll;
+    }
+
+    #inventory td {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #6b4634;
+      padding: 0;
+      background-clip: content-box;
+      color: white;
+      font-weight: bold;
+      vertical-align: super;
+    }
+
+    #controls {
+      position: absolute;
+      left: 40px;
+      bottom: 50px;
+      z-index: 2;
+    }
+
+    #controls button {
+      width: 32px;
+      height: 32px;
+      opacity: 0.5;
+    }
+
+    .inv-control {
+      background-image: url("img/inv-control.jpg");
+      opacity: 0.5;
+    }
   </style>
 </head>
 
 <body>
-  <canvas id="canvas" width="1230" height="550" style="image-rendering:pixelated"></canvas>
+  <div style="position: absolute">
+    <canvas id="canvas" width="1230" height="550" style="image-rendering:pixelated"></canvas>
+    <table id="hotbar"></table>
+    <div id="inv-wrapper" style="display:none">
+      <table id="inventory"></table>
+    </div>
+    <div id="controls">
+      <button onmousedown="keyState[65]=1" onmouseup="keyState[65]=0" ontouchstart="keyState[65]=1"
+        ontouchend="keyState[65]=0">←</button>
+      <button onclick="$(document).trigger('keypress', [87])">↑</button>
+      <button onmousedown="keyState[68]=1" onmouseup="keyState[68]=0" ontouchstart="keyState[68]=1"
+        ontouchend="keyState[68]=0">→</button>
+    </div>
+  </div>
+  <script src="jquery-3.3.1.min.js"></script>
   <script src="img/blockdata.js"></script>
+  <script src="img/itemdata.js"></script>
   <script src="md5.js"></script>
   <script>
     const bSS = 16, // blockSpriteSize
@@ -23,17 +105,98 @@
       gAcc = 32, // Gravitational acceleration (in wc/s²)
       maxH = 475, // Maximum height of the world
       terminalVelocity = -10, // Terminal velocity when dropping
-      seed = 25548; // Random seed of the world
+      seed = 25548, // Random seed of the world
+      hotbarSize = 10, // Number of slots in the hotbar
+      inventoryCol = 15; // Number of columns in the inventory UI
 
-    window.$ = function (s) { return document.querySelector(s); };
-
-    var canvas = $("#canvas");
+    var canvas = $("#canvas").get(0);
     var ctx = canvas.getContext("2d");
     ctx.imageSmoothingEnabled = false;
 
     var px = 0, py = 20, // Player's position (in wc)
       vx = 0, vy = 0; // Player's current velocity (in wc/s)
     var world = new Map(); // world[x * maxH + y] = Block ID on (x, y), or -1 for nothing
+
+    var hotbar = Array(hotbarSize); // hotbar[i] = item ID
+    for (var i = 0; i < hotbarSize; i++) hotbar[i] = -1;
+    var hotbarCur = 0; // Player's currently selected item = hotbar[hotbarCur]
+    var $hotbar = $("#hotbar");
+    (function () { // Init hotbar
+      var html = "<tr>";
+      for (var i = 0; i < hotbarSize; i++)
+        html += `<td onclick="hotbarCur=${i};renderHotbar()"></td>`;
+      html += `<td onclick="$(document).trigger('keypress', [69])" class="inv-control"></td>`;
+      html += "</tr>";
+      $hotbar.html(html);
+    })();
+    function renderHotbar() {
+      var $td = $hotbar.find("td"); // All the <td> (Array of JQuery object)
+      for (var i = 0; i < hotbarSize; i++) {
+        var ele = $($td[i]);
+        if (hotbar[i] == -1) {
+          ele.css("background-image", "none");
+          ele.html("");
+        }
+        else {
+          ele.css("background-image", `url(img/itemsprite.png)`);
+          var pos = itemData[hotbar[i]][1];
+          ele.css("background-position", `-${pos[0] * 32}px -${pos[1] * 32}px`);
+          ele.html(`${inv.q(hotbar[i])}`);
+        }
+        if (i == hotbarCur) ele.addClass("active");
+        else ele.removeClass("active");
+      }
+    }
+
+    class Inventory {
+      inv = new Map(); // inv[ItemID] = Number
+      add(id, num) { // Add `num` items of ID `id`
+        if (this.inv.has(id)) this.inv.set(id, this.inv.get(id) + num);
+        else this.inv.set(id, num);
+        if (this.inv.get(id) <= 0) {
+          this.inv.delete(id);
+          for (var i = 0; i < hotbarSize; i++)
+            if (hotbar[i] == id) hotbar[i] = -1;
+        }
+        renderHotbar();
+      }
+      q(id) { // Query the number of items of ID `id`
+        if (this.inv.has(id)) return this.inv.get(id);
+        else return 0;
+      }
+      clear(id) { // Clear all items of ID `id`
+        if (this.inv.has(id)) {
+          this.inv.delete(id);
+          for (var i = 0; i < hotbarSize; i++)
+            if (hotbar[i] == id) hotbar[i] = -1;
+        }
+        renderHotbar();
+      }
+      size() { // Size of the inventory (number of slots in it)
+        return this.inv.size;
+      }
+    }
+    var inv = new Inventory(); // Player's inventory
+    // Set the HTML of the #inventory element (but does not really render it)
+    function renderInventory() {
+      var html = "";
+      var iter = inv.inv.entries();
+      for (var i = 0; i < inventoryCol * 12; i++) {
+        if (i % inventoryCol == 0) html += "<tr>";
+        if (i < inv.size()) {
+          var entry = iter.next().value;
+          var id = entry[0], num = entry[1];
+          var pos = itemData[id][1];
+          html += `<td style="background-image:url(img/itemsprite.png);
+          background-position:-${pos[0] * 32}px -${pos[1] * 32}px"
+          onclick="pickItemInInventory(${id})">${num}</td>`;
+        }
+        else html += `<td></td>`;
+        if ((i + 1) % inventoryCol == 0) html += "</tr>";
+      }
+      $("#inventory").html(html);
+    }
+    renderHotbar();
 
     function getBlock(wc) { // Get block ID on (wc[0], wc[1])
       var x = wc[0], y = wc[1];
@@ -119,33 +282,62 @@
 
     var keyState = new Array(256); // keyState[keyCode] = 0 (up) / 1 (down)
     for (var i = 0; i < keyState.length; i++) keyState[i] = 0;
-    document.addEventListener("keydown", function (e) {
+    $(document).on("keydown", function (e) {
       keyState[e.which] = 1;
     });
-    document.addEventListener("keyup", function (e) {
+    $(document).on("keyup", function (e) {
       keyState[e.which] = 0;
     });
-    document.addEventListener("keypress", function (e) {
-      switch (e.which) {
+    $(document).on("keypress", function (e, custom) {
+      switch (e.which || custom) {
         case 87: // W
         case 119: // w
           if (collision()[2]) // Player is on the ground
             vy = jSpeed;
           break;
+        case 69: // E
+        case 101: // e
+          var invState = $("#inv-wrapper").css("display");
+          if (invState == "none") {
+            renderInventory();
+            $("#inv-wrapper").css("display", "block");
+          }
+          else $("#inv-wrapper").css("display", "none");
       }
     });
-    canvas.addEventListener("click", function (e) {
+    $(canvas).on("click", function (e) {
       var pos = canvas2world([e.offsetX, e.offsetY]);
       var blockPos = world2block(pos);
-      if (getBlock(blockPos) != -1)
+      var block = getBlock(blockPos);
+      if (block != -1) {
         world.set(blockPos[0] * maxH + blockPos[1], -1);
+        if (blockData[block][2] != -1)
+          inv.add(blockData[block][2], 1);
+      }
     });
-    canvas.oncontextmenu = function (e) {
+    $(canvas).on("contextmenu", function (e) {
       e.preventDefault();
       var pos = canvas2world([e.offsetX, e.offsetY]);
       var blockPos = world2block(pos);
-      if (getBlock(blockPos) == -1 && !collideWith(blockPos))
-        world.set(blockPos[0] * maxH + blockPos[1], 1);
+      var curItem = hotbar[hotbarCur];
+      if (curItem == -1) return;
+      var associatedBlock = itemData[curItem][2];
+      if (associatedBlock != -1) { // Place block
+        if (getBlock(blockPos) == -1 && !collideWith(blockPos))
+          world.set(blockPos[0] * maxH + blockPos[1], associatedBlock),
+            inv.add(curItem, -1);
+      }
+    });
+    canvas.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      if (e.deltaY > 0) hotbarCur++;
+      if (e.deltaY < 0) hotbarCur--;
+      hotbarCur = (hotbarCur + hotbarSize * 2) % hotbarSize;
+      renderHotbar();
+    });
+    function pickItemInInventory(id) {
+      hotbar[hotbarCur] = id;
+      renderHotbar();
     }
 
     var lastTick = null; // Time of last tick
